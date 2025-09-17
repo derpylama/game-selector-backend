@@ -1,0 +1,22 @@
+{
+  "name": "game-selector-backend",
+  "version": "0.0.1",
+  "description": "the backend for the game selector application",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^3.3.2",
+    "passport": "^0.7.0",
+    "passport-steam": "^1.0.18",
+    "ws": "^8.18.3"
+  }
+}
