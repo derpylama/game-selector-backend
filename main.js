@@ -98,7 +98,7 @@ app.get('/api/owned-games', authenticateToken, async (req, res) => {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 
-  const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${process.env.STEAM_API_KEY}&steamid=${steamid}&include_appinfo=true`;
+  const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${process.env.STEAM_API_KEY}&steamid=${steamid}&include_appinfo=true&include_played_free_games=true&include_free_sub=true`;
   console.log("Calling Steam API:", url);
 
   try {
