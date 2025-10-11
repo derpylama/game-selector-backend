@@ -4,6 +4,7 @@ const passport = require('passport');
 const SteamStrategy = require('passport-steam').Strategy;
 const dotenv = require('dotenv').config();
 const jwt = require('jsonwebtoken');
+const webSocket = require('ws');
 
 const app = express();
 
@@ -101,22 +102,120 @@ app.get('/api/owned-games', authenticateToken, async (req, res) => {
   const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${process.env.STEAM_API_KEY}&steamid=${steamid}&include_appinfo=true&include_played_free_games=true&include_free_sub=true`;
   console.log("Calling Steam API:", url);
 
-  try {
-    const r = await fetch(url);
-    console.log("Steam API status:", r.status);
+    try {
+        const r = await fetch(url);
+        console.log("Steam API status:", r.status);
 
     if (!r.ok) {
-      const text = await r.text();
-      console.error("Steam API error response:", text);
-      return res.status(500).json({ error: 'Steam API error' });
+        const text = await r.text();
+        console.error("Steam API error response:", text);
+        return res.status(500).json({ error: 'Steam API error' });
     }
 
     const data = await r.json();
     res.json(data.response || {});
   } catch (err) {
-    console.error("Fetch failed:", err);
-    res.status(500).json({ error: err.message });
+        console.error("Fetch failed:", err);
+        res.status(500).json({ error: err.message });
   }
 });
 
 app.listen(3000, () => console.log('Server listening on :3000'));
+
+// WebSocket server for real-time features (e.g., game recommendations)
+const wss = new webSocket.Server({ port: 3001 });
+
+const state = {
+  lobbies: new Map(), // lobbyId -> lobby
+  clients: new Map()  // clientId -> { ws, info }
+};
+
+wss.on('connection', function connection(ws, req) {
+    console.log('WebSocket connection established');
+
+    const token = req.url.split('token=')[1];
+    if (!token) {
+        ws.close(1008, 'No token provided');
+        return;
+    }
+
+    jwt.verify(token, process.env.SESSION_SECRET, (err, payload) => {
+        if (err) {
+            ws.close(1008, 'Invalid or expired token');
+            return;
+        }
+
+        ws.user = payload;
+        console.log('WebSocket authenticated user:', ws.user.steamid);
+        console.log(payload);   
+        ws.send(JSON.stringify({ message: 'WebSocket connection authenticated', steamid: activeTokens.get(token) }));
+        
+        state.clients.set(ws.user.steamid, { ws, info: {} });
+        ws.on('message', function incoming(rawMessage) {
+            console.log('received: %s', rawMessage);
+            // Handle incoming messages (e.g., lobby actions, chat, etc.)
+            let message;
+            try {
+                message = JSON.parse(rawMessage);
+            } catch (err) {
+                console.error('Invalid JSON:', rawMessage);
+                return;
+            }
+
+            const { action, payload } = message;
+
+            switch (action) {
+                case 'create_lobby':
+                    handleCreateLobby(ws, payload);
+                    break;
+                case 'join_lobby':
+                    handleJoinLobby(ws, payload);
+                    break;
+                case 'leave_lobby':
+                    handleLeaveLobby(ws, payload);
+                    break;
+                case 'chat_message':
+                    handleChatMessage(ws, payload);
+                    break;
+                default:
+                    console.warn('Unknown action:', action);
+            
+            };
+        });
+
+        ws.on('close', () => {
+            console.log('WebSocket connection closed for user:', ws.user.steamid);
+            state.clients.delete(ws.user.steamid);
+        });
+
+        ws.send(JSON.stringify({ message: 'Welcome to the WebSocket server!' }));
+
+        function broadcastAll(data) {
+            const msg = JSON.stringify(data);
+
+            state.clients.forEach(({ ws }) => {
+                if (ws.readyState === webSocket.OPEN) {
+                    ws.send(msg);
+                }
+            });
+
+        }
+        
+        broadcastAll({ "clients": Array.from(state.clients.keys())});
+        
+        function handleCreateLobby(ws, payload) {
+
+            console.log(payload)
+
+            const lobbyId = `lobby-${Date.now()}`;
+            state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), name: payload.name || 'New Lobby' });
+            ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId } }));
+            console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
+
+            broadcastAll({ lobbies: Array.from(state.lobbies.entries()).map(([id, lobby]) => ({ id, members: Array.from(lobby.members) })) });
+        }
+    })
+})
+
+
+console.log('WebSocket server listening on :3001');
