@@ -117,7 +117,7 @@ app.get('/api/owned-games', authenticateToken, async (req, res) => {
   } catch (err) {
         console.error("Fetch failed:", err);
         res.status(500).json({ error: err.message });
-  }
+    }
 });
 
 app.listen(3000, () => console.log('Server listening on :3000'));
@@ -126,13 +126,64 @@ app.listen(3000, () => console.log('Server listening on :3000'));
 const wss = new webSocket.Server({ port: 3001 });
 
 const state = {
-  lobbies: new Map(), // lobbyId -> lobby
-  clients: new Map()  // clientId -> { ws, info }
+    lobbies: new Map(), // lobbyId -> lobby
+    clients: new Map()  // clientId -> { ws, info }
 };
+
+function broadcastAll(data) {
+    const msg = JSON.stringify(data);
+  
+    state.clients.forEach(({ ws }, steamid) => {
+        if (ws.readyState === webSocket.OPEN) {
+            ws.send(msg, (err) => {
+                if (err) console.error("Send error:", err);
+                else console.log("Sent OK to:", steamid);
+            });
+        }
+    });
+}
+
+function handleCreateLobby(ws, payload) {
+
+    console.log(payload)
+
+    const lobbyId = `lobby-${Date.now()}`;
+    var lobbyName = payload.lobbyName || 'New Lobby';
+    state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), name: payload.lobbyname || 'New Lobby' });
+    ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
+    console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
+
+    payload.games.steamGames.forEach(game => {
+        console.log(game);
+    })
+
+    
+    //broadcastAll({ lobbies: Array.from(state.lobbies.entries()).map(([id, lobby]) => ({ id, members: Array.from(lobby.members) })) });
+}
+
+function handleJoinLobby(ws, payload) {
+    const { lobbyId } = payload;
+    const lobby = state.lobbies.get(lobbyId);
+
+    if (lobby) {
+        lobby.members.add(ws.user.steamid);
+        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId,  } }));
+        console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
+        broadcastAll({ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid } });
+    } else {
+        ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
+    }
+}
+
+function getLobbyClients(lobbyId) {
+    const lobby = state.lobbies.get(lobbyId);
+    if (!lobby) return [];
+    return Array.from(lobby.members).map(steamid => state.clients.get(steamid)?.ws).filter(Boolean);
+}
 
 wss.on('connection', function connection(ws, req) {
     console.log('WebSocket connection established');
-
+    
     const token = req.url.split('token=')[1];
     if (!token) {
         ws.close(1008, 'No token provided');
@@ -187,33 +238,7 @@ wss.on('connection', function connection(ws, req) {
             console.log('WebSocket connection closed for user:', ws.user.steamid);
             state.clients.delete(ws.user.steamid);
         });
-
-        ws.send(JSON.stringify({ message: 'Welcome to the WebSocket server!' }));
-
-        function broadcastAll(data) {
-            const msg = JSON.stringify(data);
-
-            state.clients.forEach(({ ws }) => {
-                if (ws.readyState === webSocket.OPEN) {
-                    ws.send(msg);
-                }
-            });
-
-        }
         
-        broadcastAll({ "clients": Array.from(state.clients.keys())});
-        
-        function handleCreateLobby(ws, payload) {
-
-            console.log(payload)
-
-            const lobbyId = `lobby-${Date.now()}`;
-            state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), name: payload.name || 'New Lobby' });
-            ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId } }));
-            console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
-
-            broadcastAll({ lobbies: Array.from(state.lobbies.entries()).map(([id, lobby]) => ({ id, members: Array.from(lobby.members) })) });
-        }
     })
 })
 
