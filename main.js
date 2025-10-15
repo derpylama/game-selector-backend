@@ -143,21 +143,30 @@ function broadcastAll(data) {
     });
 }
 
+function broadcastOthers(ws, data) {
+    const msg = JSON.stringify(data);
+  
+    state.clients.forEach(({ ws: clientWs }, steamid) => {
+        if (clientWs !== ws && clientWs.readyState === webSocket.OPEN) {
+            clientWs.send(msg, (err) => {
+                if (err) console.error("Send error:", err);
+                else console.log("Sent OK to:", steamid);
+            });
+        }
+    });
+}
+
 function handleCreateLobby(ws, payload) {
-
-    console.log(payload)
-
     const lobbyId = `lobby-${Date.now()}`;
     var lobbyName = payload.lobbyName || 'New Lobby';
-    state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), name: payload.lobbyname || 'New Lobby' });
+    state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), lobbyName: payload.lobbyname || 'New Lobby' });
     ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
     console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
 
     payload.games.steamGames.forEach(game => {
         console.log(game);
     })
-
-    
+        
     //broadcastAll({ lobbies: Array.from(state.lobbies.entries()).map(([id, lobby]) => ({ id, members: Array.from(lobby.members) })) });
 }
 
@@ -167,9 +176,10 @@ function handleJoinLobby(ws, payload) {
 
     if (lobby) {
         lobby.members.add(ws.user.steamid);
-        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId,  } }));
+        var lobbyName = lobby.lobbyName || 'New Lobby';
+        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName} }));
         console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
-        broadcastAll({ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid } });
+        broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid } });
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
     }
@@ -179,6 +189,25 @@ function getLobbyClients(lobbyId) {
     const lobby = state.lobbies.get(lobbyId);
     if (!lobby) return [];
     return Array.from(lobby.members).map(steamid => state.clients.get(steamid)?.ws).filter(Boolean);
+}
+
+function handleLeaveLobby(ws, payload) {
+    const { lobbyId } = payload;
+    const lobby = state.lobbies.get(lobbyId);
+
+    if (lobby && lobby.members.has(ws.user.steamid)) {
+        lobby.members.delete(ws.user.steamid);
+        ws.send(JSON.stringify({ action: 'lobby_left', payload: { lobbyId } }));
+        console.log(`User ${ws.user.steamid} left lobby ${lobbyId}`);
+        broadcastAll({ action: 'lobby_left', payload: { lobbyId: lobbyId, userID: ws.user.steamid } });
+
+        if (lobby.members.size === 0) {
+            state.lobbies.delete(lobbyId);
+            console.log(`Lobby ${lobbyId} deleted as it became empty`);
+        }
+    } else {
+        ws.send(JSON.stringify({ action: 'error', payload: { message: 'Not in the specified lobby' } }));
+    }
 }
 
 wss.on('connection', function connection(ws, req) {
