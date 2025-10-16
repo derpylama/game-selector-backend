@@ -159,7 +159,7 @@ function broadcastOthers(ws, data) {
 function handleCreateLobby(ws, payload) {
     const lobbyId = `lobby-${Date.now()}`;
     var lobbyName = payload.lobbyName || 'New Lobby';
-    state.lobbies.set(lobbyId, { members: new Set([ws.user.steamid]), lobbyName: payload.lobbyname || 'New Lobby' });
+    state.lobbies.set(lobbyId, { members: new Set([]), lobbyName: payload.lobbyname || 'New Lobby' });
     ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
     console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
 
@@ -175,11 +175,14 @@ function handleJoinLobby(ws, payload) {
     const lobby = state.lobbies.get(lobbyId);
 
     if (lobby) {
-        lobby.members.add(ws.user.steamid);
+        var username = state.clients.get(ws.user.steamid)?.info.username || 'Anonymous';
+        lobby.members.add({ steamid: ws.user.steamid, username });
         var lobbyName = lobby.lobbyName || 'New Lobby';
-        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName} }));
+        var lobbyMembers = Array.from(lobby.members);
+        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName, lobbyMembers} }));
         console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
         broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid } });
+        console.log(lobbyMembers);
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
     }
@@ -207,6 +210,17 @@ function handleLeaveLobby(ws, payload) {
         }
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Not in the specified lobby' } }));
+    }
+}
+
+function handelSetUsername(ws, payload) {
+    const client = state.clients.get(ws.user.steamid);
+    if (client) {
+        client.info.username = payload.username;
+        ws.send(JSON.stringify({ action: 'username_set', payload: { username: payload.username } }));
+        console.log(`User ${ws.user.steamid} set username to ${payload.username}`);
+    } else {
+        ws.send(JSON.stringify({ action: 'error', payload: { message: 'Client not found' } }));
     }
 }
 
@@ -254,8 +268,8 @@ wss.on('connection', function connection(ws, req) {
                 case 'leave_lobby':
                     handleLeaveLobby(ws, payload);
                     break;
-                case 'chat_message':
-                    handleChatMessage(ws, payload);
+                case 'set_username':
+                    handelSetUsername(ws, payload);
                     break;
                 default:
                     console.warn('Unknown action:', action);
