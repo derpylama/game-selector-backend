@@ -163,11 +163,10 @@ function handleCreateLobby(ws, payload) {
     ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
     console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
 
+    /*
     payload.games.steamGames.forEach(game => {
         console.log(game);
-    })
-        
-    //broadcastAll({ lobbies: Array.from(state.lobbies.entries()).map(([id, lobby]) => ({ id, members: Array.from(lobby.members) })) });
+    });*/
 }
 
 function handleJoinLobby(ws, payload) {
@@ -176,22 +175,35 @@ function handleJoinLobby(ws, payload) {
 
     if (lobby) {
         var username = state.clients.get(ws.user.steamid)?.info.username || 'Anonymous';
-        lobby.members.add({ steamid: ws.user.steamid, username });
+        var games = state.clients.get(ws.user.steamid).info.games;
+
+        //lobby.members.add({ steamid: ws.user.steamid, username, games });
+        lobby.members.add(ws.user.steamid);
+
         var lobbyName = lobby.lobbyName || 'New Lobby';
         var lobbyMembers = Array.from(lobby.members);
+
         ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName, lobbyMembers} }));
-        console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
-        broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid } });
-        console.log(lobbyMembers);
+
+        //console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
+
+        broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid, info: {games} } });
+
+        //console.log(lobbyMembers);
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
     }
+
+    console.log(compareLobbysGames(lobbyId));
 }
 
 function getLobbyClients(lobbyId) {
     const lobby = state.lobbies.get(lobbyId);
     if (!lobby) return [];
-    return Array.from(lobby.members).map(steamid => state.clients.get(steamid)?.ws).filter(Boolean);
+    return Array.from(lobby.members)
+            .map(member => state.clients.get(member.steamid))
+            .filter(Boolean);
+
 }
 
 function handleLeaveLobby(ws, payload) {
@@ -213,12 +225,13 @@ function handleLeaveLobby(ws, payload) {
     }
 }
 
-function handelSetUsername(ws, payload) {
+function handleSetUserData(ws, payload) {
     const client = state.clients.get(ws.user.steamid);
     if (client) {
         client.info.username = payload.username;
+        client.info.games = payload.games;
         ws.send(JSON.stringify({ action: 'username_set', payload: { username: payload.username } }));
-        console.log(`User ${ws.user.steamid} set username to ${payload.username}`);
+        //console.log(`User ${ws.user.steamid} set username to ${payload.username}`);
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Client not found' } }));
     }
@@ -241,12 +254,12 @@ wss.on('connection', function connection(ws, req) {
 
         ws.user = payload;
         console.log('WebSocket authenticated user:', ws.user.steamid);
-        console.log(payload);   
+        //console.log(payload);   
         ws.send(JSON.stringify({ message: 'WebSocket connection authenticated', steamid: activeTokens.get(token) }));
         
         state.clients.set(ws.user.steamid, { ws, info: {} });
         ws.on('message', function incoming(rawMessage) {
-            console.log('received: %s', rawMessage);
+            //console.log('received: %s', rawMessage);
             // Handle incoming messages (e.g., lobby actions, chat, etc.)
             let message;
             try {
@@ -268,8 +281,8 @@ wss.on('connection', function connection(ws, req) {
                 case 'leave_lobby':
                     handleLeaveLobby(ws, payload);
                     break;
-                case 'set_username':
-                    handelSetUsername(ws, payload);
+                case 'set_user_data':
+                    handleSetUserData(ws, payload);
                     break;
                 default:
                     console.warn('Unknown action:', action);
@@ -287,3 +300,74 @@ wss.on('connection', function connection(ws, req) {
 
 
 console.log('WebSocket server listening on :3001');
+
+function compareLobbysGames(lobbyId){
+    const lobby = state.lobbies.get(lobbyId);
+    if (!lobby) return { steam: [], epic: [] };
+
+    // Initialize common sets as null
+    let commonSteamIds = null;
+    let commonEpicNames = null;
+
+    // Loop through each member to find common games
+    Array.from(lobby.members).forEach(steamid => {
+
+        const client = state.clients.get(steamid);
+        if (!client || !client.info) return;
+
+        const clientInfo = client.info;
+
+        console.log("Games" , state.clients.get(steamid))
+        console.log("clientInfo", clientInfo.games.steamGames)
+
+        // Steam games intersection
+        const steamIds = (clientInfo.games.steamGames || []).map(g => g.steam_id);
+        if (commonSteamIds === null) {
+            commonSteamIds = new Set(steamIds);
+        } else {
+            commonSteamIds = new Set(steamIds.filter(id => commonSteamIds.has(id)));
+        }
+
+        // Epic games intersection
+        const epicNames = (clientInfo.games.epicGames || []).map(g => g.app_name);
+        if (commonEpicNames === null) {
+            commonEpicNames = new Set(epicNames);
+        } else {
+            commonEpicNames = new Set(epicNames.filter(name => commonEpicNames.has(name)));
+        }
+    });
+
+    // Convert back to full game objects
+    const steamGamesAllOwn = [];
+    const epicGamesAllOwn = [];
+
+    console.log("commonSteamGames", commonSteamIds)
+
+    if (commonSteamIds) {
+        Array.from(lobby.members).forEach(steamid => {
+            const clientInfo = state.clients.get(steamid)?.info;
+            if (!clientInfo) return;
+
+            (clientInfo.games.steamGames || []).forEach(game => {
+                if (commonSteamIds.has(game.steam_id) && !steamGamesAllOwn.find(g => g.steam_id === game.steam_id)) {
+                    steamGamesAllOwn.push(game);
+                }
+            });
+        });
+    }
+
+    if (commonEpicNames) {
+        Array.from(lobby.members).forEach(steamid => {
+            const clientInfo = state.clients.get(steamid)?.info;
+            if (!clientInfo) return;
+
+            (clientInfo.games.epicGames || []).forEach(game => {
+                if (commonEpicNames.has(game.app_name) && !epicGamesAllOwn.find(g => g.app_name === game.app_name)) {
+                    epicGamesAllOwn.push(game);
+                }
+            });
+        });
+    }
+    console.log("all owned" ,steamGamesAllOwn)
+    return { steam: steamGamesAllOwn, epic: epicGamesAllOwn };
+}
