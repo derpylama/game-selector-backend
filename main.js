@@ -178,7 +178,7 @@ function handleJoinLobby(ws, payload) {
         var games = state.clients.get(ws.user.steamid).info.games;
 
         //lobby.members.add({ steamid: ws.user.steamid, username, games });
-        lobby.members.add(ws.user.steamid);
+        lobby.members.add( { steamid: ws.user.steamid, userName: username});
 
         var lobbyName = lobby.lobbyName || 'New Lobby';
         var lobbyMembers = Array.from(lobby.members);
@@ -189,12 +189,11 @@ function handleJoinLobby(ws, payload) {
 
         broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid, info: {games} } });
 
-        //console.log(lobbyMembers);
+        broadcastAll({action: 'lobby_update', payload: compareLobbysGames(lobbyId)});
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
     }
 
-    console.log(compareLobbysGames(lobbyId));
 }
 
 function getLobbyClients(lobbyId) {
@@ -210,8 +209,13 @@ function handleLeaveLobby(ws, payload) {
     const { lobbyId } = payload;
     const lobby = state.lobbies.get(lobbyId);
 
-    if (lobby && lobby.members.has(ws.user.steamid)) {
-        lobby.members.delete(ws.user.steamid);
+    console.log(lobby)
+    //lobby && lobby.members.has(ws.user.steamid
+
+    var memberToRemove = Array.from(lobby.members).find(m => m.steamid === ws.user.steamid);
+
+    if (memberToRemove) {
+        lobby.members.delete(memberToRemove);
         ws.send(JSON.stringify({ action: 'lobby_left', payload: { lobbyId } }));
         console.log(`User ${ws.user.steamid} left lobby ${lobbyId}`);
         broadcastAll({ action: 'lobby_left', payload: { lobbyId: lobbyId, userID: ws.user.steamid } });
@@ -309,27 +313,27 @@ function compareLobbysGames(lobbyId){
     let commonSteamIds = null;
     let commonEpicNames = null;
 
-    // Loop through each member to find common games
-    Array.from(lobby.members).forEach(steamid => {
+    // Get all valid lobby clients
+    const lobbyMembers = Array.from(lobby.members)
+        .map(member => state.clients.get(member))
+        .filter(Boolean);
 
-        const client = state.clients.get(steamid);
-        if (!client || !client.info) return;
 
-        const clientInfo = client.info;
+    if (lobbyMembers.length === 0) return { steam: [], epic: [] };
 
-        console.log("Games" , state.clients.get(steamid))
-        console.log("clientInfo", clientInfo.games.steamGames)
-
-        // Steam games intersection
-        const steamIds = (clientInfo.games.steamGames || []).map(g => g.steam_id);
+    // --- 1. Find common Steam games ---
+    lobbyMembers.forEach(client => {
+        const steamIds = (client.info.games.steamGames || []).map(g => g.steam_id);
         if (commonSteamIds === null) {
             commonSteamIds = new Set(steamIds);
         } else {
             commonSteamIds = new Set(steamIds.filter(id => commonSteamIds.has(id)));
         }
+    });
 
-        // Epic games intersection
-        const epicNames = (clientInfo.games.epicGames || []).map(g => g.app_name);
+    // --- 2. Find common Epic games ---
+    lobbyMembers.forEach(client => {
+        const epicNames = (client.info.games.epicGames || []).map(g => g.app_name);
         if (commonEpicNames === null) {
             commonEpicNames = new Set(epicNames);
         } else {
@@ -337,37 +341,49 @@ function compareLobbysGames(lobbyId){
         }
     });
 
-    // Convert back to full game objects
-    const steamGamesAllOwn = [];
-    const epicGamesAllOwn = [];
-
-    console.log("commonSteamGames", commonSteamIds)
-
-    if (commonSteamIds) {
-        Array.from(lobby.members).forEach(steamid => {
-            const clientInfo = state.clients.get(steamid)?.info;
-            if (!clientInfo) return;
-
-            (clientInfo.games.steamGames || []).forEach(game => {
-                if (commonSteamIds.has(game.steam_id) && !steamGamesAllOwn.find(g => g.steam_id === game.steam_id)) {
-                    steamGamesAllOwn.push(game);
-                }
+    // --- 3. Build results including which clients have it installed ---
+    const steamGames = [];
+    if (commonSteamIds && commonSteamIds.size > 0) {
+        commonSteamIds.forEach(gameId => {
+            const owners = lobbyMembers.map(c => {
+                const gameObj = (c.info.games.steamGames || []).find(g => g.steam_id === gameId);
+                return {
+                    steamid: c.ws.user.steamid,
+                    username: c.info.username,
+                    installed: !!gameObj && gameObj.is_installed === 1
+                };
             });
+
+            const exampleClient = lobbyMembers.find(c =>
+                (c.info.games.steamGames || []).some(g => g.steam_id === gameId)
+            );
+            const game = exampleClient?.info.games.steamGames.find(g => g.steam_id === gameId);
+
+            if (game) steamGames.push({ game, owners });
         });
     }
 
-    if (commonEpicNames) {
-        Array.from(lobby.members).forEach(steamid => {
-            const clientInfo = state.clients.get(steamid)?.info;
-            if (!clientInfo) return;
-
-            (clientInfo.games.epicGames || []).forEach(game => {
-                if (commonEpicNames.has(game.app_name) && !epicGamesAllOwn.find(g => g.app_name === game.app_name)) {
-                    epicGamesAllOwn.push(game);
-                }
+    const epicGames = [];
+    if (commonEpicNames && commonEpicNames.size > 0) {
+        commonEpicNames.forEach(appName => {
+            const owners = lobbyMembers.map(c => {
+                const gameObj = (c.info.games.epicGames || []).find(g => g.app_name === appName);
+                return {
+                    steamid: c.ws.user.steamid,
+                    username: c.info.username,
+                    installed: !!gameObj && gameObj.is_installed === 1
+                };
             });
+
+            const exampleClient = lobbyMembers.find(c =>
+                (c.info.games.epicGames || []).some(g => g.app_name === appName)
+            );
+            const game = exampleClient?.info.games.epicGames.find(g => g.app_name === appName);
+
+            if (game) epicGames.push({ game, owners });
         });
     }
-    console.log("all owned" ,steamGamesAllOwn)
-    return { steam: steamGamesAllOwn, epic: epicGamesAllOwn };
+
+
+    return { steam: steamGames, epic: epicGames };
 }
