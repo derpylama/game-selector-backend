@@ -159,7 +159,7 @@ function broadcastOthers(ws, data) {
 function handleCreateLobby(ws, payload) {
     const lobbyId = `lobby-${Date.now()}`;
     var lobbyName = payload.lobbyName || 'New Lobby';
-    state.lobbies.set(lobbyId, { members: new Set([]), lobbyName: payload.lobbyname || 'New Lobby' });
+    state.lobbies.set(lobbyId, { members: new Set([]), lobbyName: payload.lobbyName || 'New Lobby' });
     ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
     console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
 
