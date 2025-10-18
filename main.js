@@ -234,6 +234,7 @@ function handleSetUserData(ws, payload) {
     if (client) {
         client.info.username = payload.username;
         client.info.games = payload.games;
+
         ws.send(JSON.stringify({ action: 'username_set', payload: { username: payload.username } }));
         //console.log(`User ${ws.user.steamid} set username to ${payload.username}`);
     } else {
@@ -308,18 +309,19 @@ console.log('WebSocket server listening on :3001');
 function compareLobbysGames(lobbyId){
     const lobby = state.lobbies.get(lobbyId);
     if (!lobby) return { steam: [], epic: [] };
-
+    
+    
     // Initialize common sets as null
     let commonSteamIds = null;
     let commonEpicNames = null;
-
-    // Get all valid lobby clients
+    
     const lobbyMembers = Array.from(lobby.members)
-        .map(member => state.clients.get(member))
+        .map(member => state.clients.get(member.steamid))
         .filter(Boolean);
 
-
     if (lobbyMembers.length === 0) return { steam: [], epic: [] };
+
+
 
     // --- 1. Find common Steam games ---
     lobbyMembers.forEach(client => {
