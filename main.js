@@ -120,7 +120,7 @@ app.get('/api/owned-games', authenticateToken, async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('Server listening on :3000'));
+app.listen(3000, '0.0.0.0', () => console.log('Server listening on 0.0.0.0:3000'));
 
 // WebSocket server for real-time features (e.g., game recommendations)
 const wss = new webSocket.Server({ port: 3001 });
@@ -163,10 +163,6 @@ function handleCreateLobby(ws, payload) {
     ws.send(JSON.stringify({ action: 'lobby_created', payload: { lobbyId, lobbyName  } }));
     console.log(`Lobby created: ${lobbyId} by ${ws.user.steamid} and name ${payload.lobbyName}`);
 
-    /*
-    payload.games.steamGames.forEach(game => {
-        console.log(game);
-    });*/
 }
 
 function handleJoinLobby(ws, payload) {
