@@ -10,6 +10,9 @@ const app = express();
 
 // Replace with your server-side Steam Web API key
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
+const SERVER_IP = process.env.SERVER_IP;
+const SERVER_HTTP_PORT = process.env.SERVER_HTTP_PORT;
+const SERVER_WS_PORT = process.env.SERVER_WS_PORT;
 const activeTokens = new Map();
 
 function authenticateToken(req, res, next){
@@ -41,8 +44,8 @@ passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
 passport.use(new SteamStrategy({
-  returnURL: 'http://localhost:3000/auth/steam/return',
-  realm: 'http://localhost:3000/',
+  returnURL: `http://${SERVER_IP}:${SERVER_HTTP_PORT}/auth/steam/return`,
+  realm: `http://${SERVER_IP}:${SERVER_HTTP_PORT}/`,
   apiKey: STEAM_API_KEY // passport-steam needs apiKey to fetch profile, but not strictly required for steamid via OpenID
 }, (identifier, profile, done) => {
   // profile contains steamid and other public info
@@ -65,7 +68,7 @@ app.get('/auth/steam/return',
     const refreshToken = jwt.sign({ steamid: req.user.id }, process.env.SESSION_SECRET, { expiresIn: '7d' });
     activeTokens.set(accessToken, req.user.id)
     console.log('Authenticated user:', req.user.id);
-    res.redirect(`http://localhost:3000/auth/steam/success?token=${accessToken}`);
+    res.redirect(`http://${SERVER_IP}:${SERVER_HTTP_PORT}/auth/steam/success?token=${accessToken}`);
   }
 );
 
@@ -120,10 +123,10 @@ app.get('/api/owned-games', authenticateToken, async (req, res) => {
     }
 });
 
-app.listen(3000, '0.0.0.0', () => console.log('Server listening on 0.0.0.0:3000'));
+app.listen(SERVER_HTTP_PORT, '0.0.0.0', () => console.log('Server listening on 0.0.0.0:' + SERVER_HTTP_PORT));
 
 // WebSocket server for real-time features (e.g., game recommendations)
-const wss = new webSocket.Server({ port: 3001 });
+const wss = new webSocket.Server({ port: SERVER_WS_PORT, host: '0.0.0.0' });
 
 const state = {
     lobbies: new Map(), // lobbyId -> lobby
