@@ -175,20 +175,28 @@ function handleJoinLobby(ws, payload) {
     if (lobby) {
         var username = state.clients.get(ws.user.steamid)?.info.username || 'Anonymous';
         var games = state.clients.get(ws.user.steamid).info.games;
+        
+        const alreadyInLobby = Array.from(lobby.members).some(
+        member => member.steamid === ws.user.steamid
+        );
+        if(!alreadyInLobby){
+            //lobby.members.add({ steamid: ws.user.steamid, username, games });
+            lobby.members.add( { steamid: ws.user.steamid, userName: username});
 
-        //lobby.members.add({ steamid: ws.user.steamid, username, games });
-        lobby.members.add( { steamid: ws.user.steamid, userName: username});
+            var lobbyName = lobby.lobbyName || 'New Lobby';
+            var lobbyMembers = Array.from(lobby.members);
 
-        var lobbyName = lobby.lobbyName || 'New Lobby';
-        var lobbyMembers = Array.from(lobby.members);
+            ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName, lobbyMembers} }));
 
-        ws.send(JSON.stringify({ action: 'lobby_joined', payload: { lobbyId, lobbyName, lobbyMembers} }));
+            //console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
 
-        //console.log(`User ${ws.user.steamid} joined lobby ${lobbyId}`);
+            broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid, info: {games} } });
 
-        broadcastOthers( ws,{ action: 'lobby_joined', payload: {lobbyId: lobbyId, userID: ws.user.steamid, info: {games} } });
+            broadcastAll({action: 'lobby_update', payload: compareLobbysGames(lobbyId)});
 
-        broadcastAll({action: 'lobby_update', payload: compareLobbysGames(lobbyId)});
+        }else{
+            ws.send(JSON.stringify({ action: 'error', payload: { message: 'Already in lobby' } }));
+        }
     } else {
         ws.send(JSON.stringify({ action: 'error', payload: { message: 'Lobby not found' } }));
     }
@@ -210,21 +218,25 @@ function handleLeaveLobby(ws, payload) {
 
     console.log(lobby)
     //lobby && lobby.members.has(ws.user.steamid
+    if(lobby.members){
+        var memberToRemove = Array.from(lobby.members).find(m => m.steamid === ws.user.steamid);
 
-    var memberToRemove = Array.from(lobby.members).find(m => m.steamid === ws.user.steamid);
+        if (memberToRemove) {
+            lobby.members.delete(memberToRemove);
+            ws.send(JSON.stringify({ action: 'lobby_left', payload: { lobbyId } }));
+            console.log(`User ${ws.user.steamid} left lobby ${lobbyId}`);
+            broadcastAll({ action: 'lobby_left', payload: { lobbyId: lobbyId, userID: ws.user.steamid } });
 
-    if (memberToRemove) {
-        lobby.members.delete(memberToRemove);
-        ws.send(JSON.stringify({ action: 'lobby_left', payload: { lobbyId } }));
-        console.log(`User ${ws.user.steamid} left lobby ${lobbyId}`);
-        broadcastAll({ action: 'lobby_left', payload: { lobbyId: lobbyId, userID: ws.user.steamid } });
-
-        if (lobby.members.size === 0) {
-            state.lobbies.delete(lobbyId);
-            console.log(`Lobby ${lobbyId} deleted as it became empty`);
+            if (lobby.members.size === 0) {
+                state.lobbies.delete(lobbyId);
+                console.log(`Lobby ${lobbyId} deleted as it became empty`);
+            }
+        } else {
+            ws.send(JSON.stringify({ action: 'error', payload: { message: 'Not in the specified lobby' } }));
         }
+
     } else {
-        ws.send(JSON.stringify({ action: 'error', payload: { message: 'Not in the specified lobby' } }));
+        
     }
 }
 
